@@ -1,7 +1,7 @@
 # ONET-Data-Collector
 
 ## Introduction
-ONET-Data-Collector is a Python package designed to collect data from the O*NET API. It helps in fetching keyword searches, job details, and detailed job descriptions to provide assistance for career recommendation systems and data analysis.
+ONET-Data-Collector is a Python package designed to collect data from the O*NET API. It helps in fetching keyword searches, job details, and detailed job descriptions to assist in building career recommendation systems.
 
 ## Features
 - Collects data from O*NET API
