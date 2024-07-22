@@ -1,28 +1,31 @@
+import os
 import csv
-from .OnetWebService import OnetWebService
-from .utils import get_user_input, check_for_error
+from onet_data_collector.OnetWebService import OnetWebService
+from onet_data_collector.utils import check_for_error
+import pandas as pd
 
-def keyword_search(username, password, keywords, output_path):
+def keyword_search(username, password, keyword):
+    # Initialize O*NET Web Service
     onet_ws = OnetWebService(username, password)
-
+    
     vinfo = onet_ws.call('about')
     check_for_error(vinfo)
     print("Connected to O*NET Web Services version " + str(vinfo['api_version']))
+    print("")
 
-    with open(output_path, 'w', newline='') as csvfile:
-        fieldnames = ['Keyword', 'Job Code', 'Job Title', 'SOC Code']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+    results = []
 
-        for keyword in keywords:
-            print(f"Performing keyword search for: {keyword}")
-            kwresults = onet_ws.call('online/search', ('keyword', keyword), ('end', 50))
-            check_for_error(kwresults)
+    print(f"Performing keyword search for: {keyword}")
+    kwresults = onet_ws.call('online/search', ('keyword', keyword), ('end', 50))
+    check_for_error(kwresults)
 
-            if 'occupation' in kwresults and len(kwresults['occupation']) > 0:
-                for occ in kwresults['occupation']:
-                    job_code = occ['code']
-                    soc_code = job_code.split('-')[0]  # Extract SOC code (first 2 digits of job code)
-                    writer.writerow({'Keyword': keyword, 'Job Code': job_code, 'Job Title': occ['title'], 'SOC Code': soc_code})
+    if 'occupation' in kwresults and len(kwresults['occupation']) > 0:
+        for occ in kwresults['occupation']:
+            job_code = occ['code']
+            job_title = occ['title']
+            soc_code = job_code.split('-')[0]  # Extract SOC code (first 2 digits of job code)
+            results.append({'Keyword': keyword, 'Job Code': job_code, 'Job Title': job_title, 'SOC Code': soc_code})
 
-    print("Keyword search completed successfully.")
+    # Convert the results to a DataFrame
+    df = pd.DataFrame(results)
+    return df
