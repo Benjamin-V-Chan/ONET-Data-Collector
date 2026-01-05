@@ -1,5 +1,3 @@
-import os
-import csv
 from onet_data_collector.OnetWebService import OnetWebService
 from onet_data_collector.utils import check_for_error
 import pandas as pd
