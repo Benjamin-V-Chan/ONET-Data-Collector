@@ -8,6 +8,8 @@ At a high level, this repository behaves like a lightweight ETL system for occup
 
 The repository is especially useful for building AI-native education or workforce software because most downstream AI systems do not operate well on raw nested API responses. They need normalized, structured, and retrieval-friendly data. ONET-Data-Collector provides that transformation layer.
 
+This public version of the repository contains the base architecture for the officially contracted project. This is not the full project as the full contents are privately contracted out.
+
 ---
 
 ## Why This Repository Exists
