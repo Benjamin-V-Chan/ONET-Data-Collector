@@ -1,56 +1,104 @@
+"""Flatten raw O*NET occupation-detail JSON into a tidy CSV.
+
+Raw O*NET detail documents are deeply nested and shape-inconsistent (a field can
+be absent, a single object, or a list). :func:`condense_job_details` normalises
+each occupation into a single flat row keyed by ``occupation_code``, joining
+multi-valued fields with ``"; "`` so the result loads cleanly into pandas or a
+spreadsheet.
+"""
+
+from __future__ import annotations
+
 import json
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
 
-def condense_job_details(input_json_path, output_csv_path):
-    with open(input_json_path, 'r') as f:
-        job_details = json.load(f)
+from ._logging import get_logger
+from .utils import as_list, dig
 
-    condensed_data = []
+log = get_logger("condense")
 
-    for job in job_details:
-        occupation = job['occupation']
-        tasks = job.get('tasks', {}).get('task', [])
-        technology_skills = job.get('technology_skills', {}).get('category', [])
-        tools_used = job.get('tools_used', {}).get('category', [])
-        knowledge = job.get('knowledge', {}).get('element', [])
-        skills = job.get('skills', {}).get('element', [])
-        abilities = job.get('abilities', {}).get('element', [])
-        work_activities = job.get('work_activities', {}).get('element', [])
-        detailed_work_activities = job.get('detailed_work_activities', {}).get('activity', [])
-        work_context = job.get('work_context', {}).get('element', [])
-        job_zone = job.get('job_zone', {})
-        education = job.get('education', {}).get('level_required', {}).get('category', [])
-        interests = job.get('interests', {}).get('element', [])
-        work_styles = job.get('work_styles', {}).get('element', [])
-        work_values = job.get('work_values', {}).get('element', [])
-        related_occupations = job.get('related_occupations', {}).get('occupation', [])
-        additional_information = job.get('additional_information', {}).get('source', [])
+JOIN = "; "
 
-        job_data = {
-            'occupation_code': occupation.get('code', ''),
-            'occupation_title': occupation.get('title', ''),
-            'description': occupation.get('description', ''),
-            'bright_outlook': occupation.get('tags', {}).get('bright_outlook', False),
-            'green': occupation.get('tags', {}).get('green', False),
-            'tasks': '; '.join([task['statement'] for task in tasks]),
-            'technology_skills': '; '.join([tech['title']['name'] for tech in technology_skills]),
-            'tools_used': '; '.join([tool['title']['name'] for tool in tools_used]),
-            'knowledge': '; '.join([k['name'] for k in knowledge]),
-            'skills': '; '.join([skill['name'] for skill in skills]),
-            'abilities': '; '.join([ability['name'] for ability in abilities]),
-            'work_activities': '; '.join([activity['name'] for activity in work_activities]),
-            'detailed_work_activities': '; '.join([dwa['name'] for dwa in detailed_work_activities]),
-            'work_context': '; '.join([context['name'] for context in work_context]),
-            'job_zone': job_zone.get('title', ''),
-            'education': '; '.join([edu['name'] for edu in education]),
-            'interests': '; '.join([interest['name'] for interest in interests]),
-            'work_styles': '; '.join([style['name'] for style in work_styles]),
-            'work_values': '; '.join([value['name'] for value in work_values]),
-            'related_occupations': '; '.join([occ['title'] for occ in related_occupations]),
-            'additional_information': '; '.join([info['name'] for info in additional_information]),
-        }
 
-        condensed_data.append(job_data)
+def _join(items: Any, *keys: str) -> str:
+    """Join a collection's per-item text values with ``"; "``.
 
-    df = pd.DataFrame(condensed_data)
-    df.to_csv(output_csv_path, index=False)
+    For each item, the first present key in ``keys`` (supporting dotted paths
+    like ``"title.name"``) is used. Plain string items are used as-is.
+    """
+    values: list[str] = []
+    for item in as_list(items):
+        value = None
+        if isinstance(item, str):
+            value = item
+        else:
+            for key in keys:
+                value = dig(item, *key.split(".")) if "." in key else _get(item, key)
+                if value:
+                    break
+        if value:
+            values.append(str(value).strip())
+    return JOIN.join(values)
+
+
+def _get(item: Any, key: str) -> Any:
+    return item.get(key) if isinstance(item, dict) else None
+
+
+def _condense_one(job: dict[str, Any]) -> dict[str, Any]:
+    occupation = job.get("occupation", {}) or {}
+    tags = occupation.get("tags", {}) or {}
+    return {
+        "occupation_code": occupation.get("code", ""),
+        "occupation_title": occupation.get("title", ""),
+        "description": occupation.get("description", ""),
+        "bright_outlook": bool(tags.get("bright_outlook", False)),
+        "green": bool(tags.get("green", False)),
+        "tasks": _join(dig(job, "tasks", "task"), "statement", "name"),
+        "technology_skills": _join(dig(job, "technology_skills", "category"), "title.name", "title"),
+        "tools_used": _join(dig(job, "tools_used", "category"), "title.name", "title"),
+        "knowledge": _join(dig(job, "knowledge", "element"), "name"),
+        "skills": _join(dig(job, "skills", "element"), "name"),
+        "abilities": _join(dig(job, "abilities", "element"), "name"),
+        "work_activities": _join(dig(job, "work_activities", "element"), "name"),
+        "detailed_work_activities": _join(
+            dig(job, "detailed_work_activities", "activity"), "name", "title"
+        ),
+        "work_context": _join(dig(job, "work_context", "element"), "name"),
+        "job_zone": dig(job, "job_zone", "title", default=""),
+        "education": _join(dig(job, "education", "level_required", "category"), "name"),
+        "interests": _join(dig(job, "interests", "element"), "name"),
+        "work_styles": _join(dig(job, "work_styles", "element"), "name"),
+        "work_values": _join(dig(job, "work_values", "element"), "name"),
+        "related_occupations": _join(dig(job, "related_occupations", "occupation"), "title"),
+        "additional_information": _join(dig(job, "additional_information", "source"), "name"),
+    }
+
+
+def condense_job_details(input_json_path: str, output_csv_path: str) -> pd.DataFrame:
+    """Flatten raw detail JSON into a CSV and return the resulting DataFrame.
+
+    Args:
+        input_json_path: Path to the raw JSON produced by
+            :func:`onet_data_collector.job_details.fetch_job_details`.
+        output_csv_path: Where to write the flattened CSV.
+
+    Returns:
+        The condensed DataFrame (one row per occupation).
+    """
+    path = Path(input_json_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Input JSON not found: {input_json_path}")
+
+    job_details = json.loads(path.read_text(encoding="utf-8"))
+    rows = [_condense_one(job) for job in as_list(job_details)]
+
+    df = pd.DataFrame(rows)
+    out_path = Path(output_csv_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    log.info("Condensed %d occupations to %s", len(df), output_csv_path)
+    return df
