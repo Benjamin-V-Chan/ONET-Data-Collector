@@ -6,6 +6,8 @@ Exposes the pipeline as the ``onet-collect`` console script:
     onet-collect details data/raw/keywords.csv -o data/raw/job_details.json
     onet-collect condense data/raw/job_details.json -o data/processed/condensed.csv
     onet-collect pipeline "data scientist" "nursing" --out-dir data
+    onet-collect bulk download                      # full O*NET database (no credentials)
+    onet-collect bulk info
 
 Credentials come from ``--username/--password``, the ``ONET_USERNAME`` /
 ``ONET_PASSWORD`` environment variables, or a ``.env`` file. Missing values are
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from . import __version__
 from ._logging import configure, get_logger
+from .bulk import cached_releases, download_bulk, load_bulk
 from .condensed_job_details import condense_job_details
 from .config import resolve_credentials
 from .exceptions import OnetError
@@ -67,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipe.add_argument("--out-dir", default="data", help="Base output directory.")
     p_pipe.add_argument("--max-results", type=int, default=None)
     _add_credential_args(p_pipe)
+
+    # bulk database download (no credentials needed)
+    p_bulk = sub.add_parser("bulk", help="Download / inspect the full O*NET database release.")
+    bulk_sub = p_bulk.add_subparsers(dest="bulk_command", required=True)
+    p_dl = bulk_sub.add_parser("download", help="Download and cache a release.")
+    p_dl.add_argument("--release", default=None, help="e.g. 31.0 (default: latest).")
+    p_dl.add_argument("--cache-dir", default=None, help="Cache root (default: $ONET_BULK_DIR or ~/.cache).")
+    p_dl.add_argument("--force", action="store_true", help="Re-download even if cached.")
+    p_info = bulk_sub.add_parser("info", help="Show cached releases and their manifest.")
+    p_info.add_argument("--release", default=None)
+    p_info.add_argument("--cache-dir", default=None)
 
     return parser
 
@@ -119,11 +133,26 @@ def _cmd_pipeline(args: argparse.Namespace) -> None:
     log.info("Stage 3/3 complete: condensed table -> %s", condensed_csv)
 
 
+def _cmd_bulk(args: argparse.Namespace) -> None:
+    if args.bulk_command == "download":
+        release = download_bulk(args.release, cache_dir=args.cache_dir, force=args.force)
+    else:
+        log.info("Cached releases: %s", ", ".join(cached_releases(args.cache_dir)) or "(none)")
+        release = load_bulk(args.release, cache_dir=args.cache_dir)
+    m = release.manifest
+    print(f"O*NET {m['release']} at {release.path}")
+    print(f"  source:     {m['source_url']}")
+    print(f"  downloaded: {m['downloaded_at']}")
+    print(f"  sha256:     {m['sha256']}")
+    print(f"  tables:     {', '.join(release.available())}")
+
+
 _COMMANDS = {
     "search": _cmd_search,
     "details": _cmd_details,
     "condense": _cmd_condense,
     "pipeline": _cmd_pipeline,
+    "bulk": _cmd_bulk,
 }
 
 

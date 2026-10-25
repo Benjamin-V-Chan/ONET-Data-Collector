@@ -37,6 +37,11 @@ subcommand:
 Under the hood everything runs through `OnetClient`, a resilient wrapper around
 the O*NET REST API with retries, timeouts, pagination, and typed errors.
 
+It can also download the **entire O*NET database release** in one go (no
+credentials needed), which is what offline modelling such as the semantic
+occupation matcher in `data-science-onet` uses. See
+[Bulk database download](#bulk-database-download).
+
 ---
 
 ## Install
@@ -106,6 +111,43 @@ results = onet.paginate("online/search", ("keyword", "design"), item_key="occupa
 
 ---
 
+## Bulk database download
+
+O*NET publishes its full database as a versioned zip. `onet-collect bulk`
+downloads it, caches it **outside the repo**, and records provenance:
+
+```bash
+onet-collect bulk download                 # latest release (31.0 at the time of writing)
+onet-collect bulk download --release 30.1  # a specific release
+onet-collect bulk info                     # cached releases, manifest, available tables
+```
+
+```python
+from onet_data_collector import download_bulk, load_bulk
+
+release = download_bulk()                  # or load_bulk() to reuse the cache offline
+release.manifest                           # release, source_url, sha256, downloaded_at, files
+titles = release.table("job_titles")       # snake_case columns, all strings
+skills = release.table("skills")           # Essential + Transferable Skills (31.0+) or legacy Skills.txt
+```
+
+- **Cache:** `~/.cache/onet_data_collector/bulk/db_<version>/`. Override with
+  `ONET_BULK_DIR` or `--cache-dir`. Each release has a `manifest.json` with
+  the version, source URL, SHA-256 of the zip, download timestamp and file list.
+- **Stable table names across releases:** O*NET renames files between releases.
+  For example, 31.0 replaced `Alternate Titles.txt` with `Job Titles.txt` and
+  split `Skills.txt` into Essential and Transferable Skills. `TABLES` in
+  `onet_data_collector/bulk.py` maps logical names (`occupation_data`,
+  `job_titles`, `reported_titles`, `task_statements`, `task_ratings`,
+  `tasks_to_dwas`, `dwa_reference`, `skills`, `knowledge`, `abilities`,
+  `interests`, `job_zones`, ...) to every known file name.
+- **TLS:** `certifi`'s CA bundle is used when it is installed. python.org macOS
+  builds otherwise fail TLS verification until "Install Certificates.command" is run.
+- **Licence:** O*NET data is CC BY 4.0
+  (<https://www.onetcenter.org/license_db.html>).
+
+---
+
 ## Output schema
 
 `condense_job_details` produces one row per occupation with these columns:
@@ -142,7 +184,7 @@ without re-hitting the API.
 
 ```bash
 pip install -e ".[dev]"
-pytest            # 29 tests, all offline (no network / credentials needed)
+pytest            # all offline (no network / credentials needed)
 ```
 
 ## Backwards compatibility
@@ -154,8 +196,8 @@ The original import paths and function names still work:
 
 ## Project role in the larger stack
 
-- **ONET-Data-Collector** (this repo) — ingestion, retrieval, normalization.
-- **data-science-onet** — analytics, clustering, keyword attribution.
+- **ONET-Data-Collector** (this repo) — ingestion, retrieval, normalization, bulk database download.
+- **data-science-onet** — analytics, clustering, keyword attribution, semantic occupation matching.
 
 Together they form a modular pipeline from public labor-market data to
 analysis-ready occupational tables.
